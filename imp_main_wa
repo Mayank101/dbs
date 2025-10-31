@@ -1,0 +1,126 @@
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
+    """Handle incoming WhatsApp webhook and send responses via Twilio."""
+
+    # --- Step 1: Session setup ---
+    session_id = From.replace("whatsapp:", "") if From else "unknown"
+    existing_chat = sessions.get(session_id, [])
+
+    state: ChatState = {
+        "session_id": session_id,
+        "user_message": Body,
+        "chat_history": existing_chat
+    }
+
+    result = graph_app.invoke(state)
+    resp = result.get("response", {}) if isinstance(result, dict) else {}
+
+    assistant_text = None
+    if isinstance(resp, dict):
+        assistant_text = resp.get("assistant_message") or resp.get("assistantResponse")
+    if not assistant_text:
+        assistant_text = "Sorry, I couldn't process your request right now."
+
+    # --- Step 2: Update session if needed ---
+    try:
+        updated_chat = resp.get("updated_chat_history")
+        if isinstance(updated_chat, list):
+            sessions[session_id] = updated_chat
+    except Exception:
+        pass
+
+    # --- Step 3: Extract search results (products) ---
+    search_results = []
+    try:
+        search_results = resp.get("search_results") if isinstance(resp, dict) else []
+    except Exception:
+        pass
+
+    # --- Step 4: Send messages via Twilio ---
+    sent_via_twilio = False
+    twilio_error = None
+
+    if twilio_client and TWILIO_WHATSAPP_FROM:
+        try:
+            to_number = From if (From and From.startswith("whatsapp:")) else f"whatsapp:{session_id}"
+
+            # 1️⃣ Send assistant's message first
+            msg = twilio_client.messages.create(
+                body=assistant_text.strip(),
+                from_=TWILIO_WHATSAPP_FROM,
+                to=to_number
+            )
+            logger.info("Sent assistant message via Twilio to %s, SID=%s", to_number, getattr(msg, 'sid', None))
+
+            # 2️⃣ Then send each product as a separate message
+            if search_results and isinstance(search_results, list):
+                for i, item in enumerate(search_results[:10], start=1):
+                    try:
+                        meta = item[0] if isinstance(item, (list, tuple)) else item
+                        name = meta.get('productName') or meta.get('title') or meta.get('name') or meta.get('product_name') or "Product"
+                        desc = meta.get('description') or meta.get('short_description') or meta.get('productDescription') or meta.get('product_desc') or ""
+                        price = meta.get('price')
+                        url = meta.get('url') or meta.get('product_url') or meta.get('shopping_link') or ""
+                        category = meta.get('productCategory') or meta.get('category') or meta.get('department') or ""
+                        brand = meta.get('brandName') or meta.get('brand') or meta.get('manufacturer') or ""
+                        total_order = meta.get('total_order') or meta.get('totalOrder') or meta.get('order_value') or meta.get('totalOrders')
+                        prod_id = meta.get('key') or meta.get('productId') or meta.get('product_id') or meta.get('id')
+
+                        # Build image URL
+                        image_url = None
+                        if prod_id:
+                            image_url = f"https://xcdn.next.co.uk/common/items/default/default/itemimages/3_4Ratio/product/lge/{prod_id}s.jpg?im=Resize,width=400"
+
+                        # Build product message
+                        product_msg = f"{i}. {name}"
+                        if desc:
+                            short_desc = (desc[:240] + '...') if len(desc) > 240 else desc
+                            product_msg += f"\n{short_desc}"
+                        if brand:
+                            product_msg += f"\nBrand: {brand}"
+                        if category:
+                            product_msg += f"\nCategory: {category}"
+                        if price:
+                            product_msg += f"\nPrice: {price}"
+                        if total_order:
+                            product_msg += f"\nTotal orders: {total_order}"
+                        if url:
+                            product_msg += f"\nLink: {url}"
+
+                        # Send the message for this product
+                        if image_url:
+                            msg = twilio_client.messages.create(
+                                body=product_msg,
+                                from_=TWILIO_WHATSAPP_FROM,
+                                to=to_number,
+                                media_url=[image_url]
+                            )
+                        else:
+                            msg = twilio_client.messages.create(
+                                body=product_msg,
+                                from_=TWILIO_WHATSAPP_FROM,
+                                to=to_number
+                            )
+
+                        logger.info("Sent product %d via Twilio to %s, SID=%s", i, to_number, getattr(msg, 'sid', None))
+                    except Exception as e:
+                        logger.exception("Error sending product %d: %s", i, e)
+                        continue
+
+            sent_via_twilio = True
+
+        except Exception as e:
+            twilio_error = str(e)
+            logger.exception("Failed to send WhatsApp message via Twilio: %s", e)
+
+    # --- Step 5: Build TwiML Response (for Twilio webhook acknowledgment) ---
+    status_note = ""
+    if sent_via_twilio:
+        status_note = " (sent via Twilio)"
+    elif twilio_error:
+        status_note = f" (Twilio send failed: {xml_escape(twilio_error)})"
+
+    safe_text = xml_escape(str(assistant_text))
+    twiml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{safe_text}{xml_escape(status_note)}</Message></Response>'
+
+    return Response(content=twiml, media_type="application/xml")
