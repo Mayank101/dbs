@@ -1,0 +1,126 @@
+# Global pagination memory
+user_offsets = {}   # { "919876543210": 3 }
+PAGE_SIZE = 3
+
+def build_cdn_url(prod_id: str):
+    return f"https://xcdn.next.co.uk/common/items/default/default/itemimages/3_4Ratio/product/lge/{prod_id}s.jpg?im=Resize,width=400"
+
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
+    """Enhanced WhatsApp webhook with pagination and images."""
+
+    session_id = From.replace("whatsapp:", "") if From else "unknown"
+    existing_chat = sessions.get(session_id, [])
+
+    state: ChatState = {
+        "session_id": session_id,
+        "user_message": Body,
+        "chat_history": existing_chat
+    }
+
+    result = graph_app.invoke(state)
+    resp = result.get("response", {}) if isinstance(result, dict) else {}
+
+    assistant_text = resp.get("assistant_message") or resp.get("assistantResponse") or "Sorry, I could not process your request."
+
+    # update chat history
+    updated_chat = resp.get("updated_chat_history")
+    if isinstance(updated_chat, list):
+        sessions[session_id] = updated_chat
+
+    # extract search results
+    search_results = resp.get("search_results", [])
+    if not isinstance(search_results, list):
+        search_results = []
+
+    user_number = From if From.startswith("whatsapp:") else f"whatsapp:{session_id}"
+
+    is_more = Body.strip().lower() == "more"
+
+    # --------------------------
+    # Pagination Logic
+    # --------------------------
+    if is_more:
+        offset = user_offsets.get(session_id, 0)
+    else:
+        offset = 0
+        user_offsets[session_id] = 0
+
+        # send assistant main message
+        twilio_client.messages.create(
+            body=assistant_text,
+            from_=TWILIO_WHATSAPP_FROM,
+            to=user_number
+        )
+        await asyncio.sleep(0.5)
+
+    products_to_send = search_results[offset: offset + PAGE_SIZE]
+
+    # no more products
+    if not products_to_send:
+        twilio_client.messages.create(
+            body="No more products to show.",
+            from_=TWILIO_WHATSAPP_FROM,
+            to=user_number
+        )
+        return Response(content="<Response></Response>", media_type="application/xml")
+
+    # --------------------------
+    # Send products
+    # --------------------------
+    for p in products_to_send:
+        meta = p[0] if isinstance(p, (list, tuple)) else p
+
+        name = meta.get("productName") or meta.get("title") or "Product"
+        category = meta.get("productCategory") or meta.get("category") or ""
+        price = meta.get("price")
+        total_order = meta.get("total_order")
+        url = meta.get("url") or ""
+
+        prod_id = (
+            meta.get("key")
+            or meta.get("productId")
+            or meta.get("product_id")
+            or meta.get("id")
+        )
+
+        image_url = build_cdn_url(prod_id) if prod_id else None
+
+        msg = (
+            f"{name}\n"
+            f"Category: {category}\n"
+            f"Price: {price}\n"
+            f"Total orders: {total_order}\n"
+            f"Link: {url}"
+        )
+
+        if image_url:
+            twilio_client.messages.create(
+                body=msg,
+                from_=TWILIO_WHATSAPP_FROM,
+                to=user_number,
+                media_url=[image_url]
+            )
+        else:
+            twilio_client.messages.create(
+                body=msg,
+                from_=TWILIO_WHATSAPP_FROM,
+                to=user_number
+            )
+
+        await asyncio.sleep(0.5)
+
+    # update offset
+    new_offset = offset + PAGE_SIZE
+    user_offsets[session_id] = new_offset
+
+    # show more if remaining
+    if new_offset < len(search_results):
+        twilio_client.messages.create(
+            body="Send more to see more products.",
+            from_=TWILIO_WHATSAPP_FROM,
+            to=user_number
+        )
+
+    return Response(content="<Response></Response>", media_type="application/xml")
