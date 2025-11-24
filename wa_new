@@ -1,126 +1,274 @@
-# Global pagination memory
-user_offsets = {}   # { "919876543210": 3 }
-PAGE_SIZE = 3
+# main.py
+import asyncio
+import os
+import logging
+from typing import Any, Dict, List
 
-def build_cdn_url(prod_id: str):
-    return f"https://xcdn.next.co.uk/common/items/default/default/itemimages/3_4Ratio/product/lge/{prod_id}s.jpg?im=Resize,width=400"
+from fastapi import FastAPI, Form
+from fastapi.responses import Response
+from twilio.rest import Client
+from dotenv import load_dotenv
 
+# load .env
+load_dotenv()
 
+# -------------------------
+# Basic logging
+# -------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("whatsapp_webhook")
+
+# -------------------------
+# App + Twilio config
+# -------------------------
+app = FastAPI()
+
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+logger.info("Twilio client initialized, from=%s", TWILIO_WHATSAPP_FROM)
+
+# -------------------------
+# Pagination memory (per session)
+# -------------------------
+user_offsets: Dict[str, int] = {}  # keyed by session_id
+PAGE_SIZE = int(os.getenv("PAGE_SIZE", "3"))
+
+# -------------------------
+# Image sizing config (env override)
+# -------------------------
+IMAGE_MAX_WIDTH = int(os.getenv("IMAGE_MAX_WIDTH", "1600"))
+IMAGE_QUALITY = int(os.getenv("IMAGE_QUALITY", "95"))
+
+def build_cdn_url(prod_id: str) -> str:
+    """
+    Build a high-resolution Next CDN image URL.
+    Example:
+    https://.../lge/F23438s.jpg?im=Resize,width=1600,quality=95
+    """
+    if not prod_id:
+        return ""
+    return (
+        f"https://xcdn.next.co.uk/common/items/default/default/itemimages/3_4Ratio/"
+        f"product/lge/{prod_id}s.jpg?im=Resize,width={IMAGE_MAX_WIDTH},quality={IMAGE_QUALITY}"
+    )
+
+# -------------------------
+# Placeholder globals you likely already have in your app
+# -------------------------
+# sessions: mapping session_id -> chat history list
+# graph_app: object with .invoke(state) -> dict(...)
+# ChatState: type alias or class; we will use dict for state shape
+# If you already have these, import them instead of the placeholders below.
+sessions: Dict[str, List[Any]] = {}  # if you already have sessions, remove this line
+graph_app = globals().get("graph_app")  # if graph_app is defined/imported elsewhere, it'll be used
+# If graph_app is not present, we'll create a fallback that returns empty response
+if graph_app is None:
+    class _FallbackGraphApp:
+        def invoke(self, state):
+            return {"response": {"assistant_message": "Sorry, service unavailable.", "search_results": []}}
+    graph_app = _FallbackGraphApp()
+
+# -------------------------
+# Helper: safe extractor for search_results
+# -------------------------
+def normalize_search_results(raw: Any) -> List[dict]:
+    """
+    Normalize possible shapes of search_results into a list of dicts.
+    Accepts:
+      - [] (already good)
+      - [{id: {...}}, ...]  (object mapping inside list)
+      - [[{...}], [...]] (list of single-element lists)
+      - dict mapping prod_id -> meta  (convert to list of meta dicts with product_id if missing)
+    """
+    out: List[dict] = []
+
+    if not raw:
+        return out
+
+    # if mapping prod_id -> meta
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            if isinstance(v, dict):
+                meta = dict(v)
+                # try to preserve product id fields if not present
+                if not any(x in meta for x in ("productId", "product_id", "id", "key", "prod_id")):
+                    meta["product_id"] = k
+                out.append(meta)
+        return out
+
+    # if already a list
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                out.append(item)
+            elif isinstance(item, (list, tuple)) and item:
+                first = item[0]
+                if isinstance(first, dict):
+                    out.append(first)
+                else:
+                    # can't normalize, skip
+                    continue
+            else:
+                # skip unknown shapes
+                continue
+    return out
+
+# -------------------------
+# WhatsApp webhook
+# -------------------------
 @app.post("/whatsapp/webhook")
 async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
-    """Enhanced WhatsApp webhook with pagination and images."""
+    """
+    Handle incoming WhatsApp webhook:
+      - invoke graph_app with session state
+      - read assistant message + search_results
+      - send assistant message (only on fresh requests)
+      - paginate products (PAGE_SIZE) with images built via build_cdn_url
+      - return empty TwiML response to Twilio
+    """
 
-    session_id = From.replace("whatsapp:", "") if From else "unknown"
+    session_id = (From.replace("whatsapp:", "") if From else "unknown")
+    logger.info("Webhook called session_id=%s body=%s", session_id, Body[:120])
+
+    # --- Step 1: Restore chat history for session ---
     existing_chat = sessions.get(session_id, [])
 
-    state: ChatState = {
+    # Build state for your graph app (shape matches your earlier code)
+    state = {
         "session_id": session_id,
         "user_message": Body,
         "chat_history": existing_chat
     }
 
-    result = graph_app.invoke(state)
+    # --- Step 2: Invoke graph_app ---
+    try:
+        result = graph_app.invoke(state)
+    except Exception as e:
+        logger.exception("graph_app.invoke failed: %s", e)
+        result = {"response": {"assistant_message": "Sorry, I couldn't process your request right now.", "search_results": []}}
+
     resp = result.get("response", {}) if isinstance(result, dict) else {}
 
     assistant_text = resp.get("assistant_message") or resp.get("assistantResponse") or "Sorry, I could not process your request."
+    # update session history if provided
+    try:
+        updated_chat = resp.get("updated_chat_history")
+        if isinstance(updated_chat, list):
+            sessions[session_id] = updated_chat
+    except Exception:
+        pass
 
-    # update chat history
-    updated_chat = resp.get("updated_chat_history")
-    if isinstance(updated_chat, list):
-        sessions[session_id] = updated_chat
+    # --- Step 3: Extract and normalize search results ---
+    raw_search_results = resp.get("search_results", [])
+    normalized_results = normalize_search_results(raw_search_results)
 
-    # extract search results
-    search_results = resp.get("search_results", [])
-    if not isinstance(search_results, list):
-        search_results = []
-
-    user_number = From if From.startswith("whatsapp:") else f"whatsapp:{session_id}"
-
+    # --- Step 4: Pagination logic ---
+    user_number = From if From and From.startswith("whatsapp:") else f"whatsapp:{session_id}"
     is_more = Body.strip().lower() == "more"
 
-    # --------------------------
-    # Pagination Logic
-    # --------------------------
     if is_more:
         offset = user_offsets.get(session_id, 0)
     else:
+        # fresh start, reset offset and send assistant message
         offset = 0
         user_offsets[session_id] = 0
 
-        # send assistant main message
-        twilio_client.messages.create(
-            body=assistant_text,
-            from_=TWILIO_WHATSAPP_FROM,
-            to=user_number
-        )
-        await asyncio.sleep(0.5)
+        try:
+            twilio_client.messages.create(
+                body=assistant_text,
+                from_=TWILIO_WHATSAPP_FROM,
+                to=user_number
+            )
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.exception("Failed to send assistant message: %s", e)
 
-    products_to_send = search_results[offset: offset + PAGE_SIZE]
+    # slice products for the page
+    products_to_send = normalized_results[offset: offset + PAGE_SIZE]
 
-    # no more products
     if not products_to_send:
-        twilio_client.messages.create(
-            body="No more products to show.",
-            from_=TWILIO_WHATSAPP_FROM,
-            to=user_number
-        )
+        # nothing to show
+        try:
+            twilio_client.messages.create(
+                body="No more products to show.",
+                from_=TWILIO_WHATSAPP_FROM,
+                to=user_number
+            )
+        except Exception as e:
+            logger.exception("Failed sending 'no more' message: %s", e)
+
         return Response(content="<Response></Response>", media_type="application/xml")
 
-    # --------------------------
-    # Send products
-    # --------------------------
-    for p in products_to_send:
-        meta = p[0] if isinstance(p, (list, tuple)) else p
+    # --- Step 5: Send products for this page ---
+    for meta in products_to_send:
+        # meta is expected to be a dict
+        if not isinstance(meta, dict):
+            continue
 
-        name = meta.get("productName") or meta.get("title") or "Product"
+        name = meta.get("productName") or meta.get("title") or meta.get("name") or "Product"
         category = meta.get("productCategory") or meta.get("category") or ""
-        price = meta.get("price")
-        total_order = meta.get("total_order")
-        url = meta.get("url") or ""
+        price = meta.get("price") if meta.get("price") is not None else ""
+        total_order = meta.get("total_order") or meta.get("totalOrder") or ""
+        url = meta.get("url") or meta.get("product_url") or ""
 
+        # pick prod id from several possible keys, preserve original key names
         prod_id = (
             meta.get("key")
             or meta.get("productId")
             or meta.get("product_id")
             or meta.get("id")
+            or meta.get("product_id")  # fallback
         )
 
         image_url = build_cdn_url(prod_id) if prod_id else None
 
-        msg = (
-            f"{name}\n"
-            f"Category: {category}\n"
-            f"Price: {price}\n"
-            f"Total orders: {total_order}\n"
-            f"Link: {url}"
-        )
+        # Build message without description, without brand, no numbering
+        product_msg_parts = [
+            f"{name}",
+            f"Category: {category}" if category else None,
+            f"Price: {price}" if price != "" else None,
+            f"Total orders: {total_order}" if total_order != "" else None,
+            f"Link: {url}" if url else None,
+        ]
+        # filter None
+        product_msg = "\n".join([p for p in product_msg_parts if p])
 
-        if image_url:
-            twilio_client.messages.create(
-                body=msg,
-                from_=TWILIO_WHATSAPP_FROM,
-                to=user_number,
-                media_url=[image_url]
-            )
-        else:
-            twilio_client.messages.create(
-                body=msg,
-                from_=TWILIO_WHATSAPP_FROM,
-                to=user_number
-            )
+        try:
+            if image_url:
+                twilio_client.messages.create(
+                    body=product_msg,
+                    from_=TWILIO_WHATSAPP_FROM,
+                    to=user_number,
+                    media_url=[image_url]
+                )
+            else:
+                twilio_client.messages.create(
+                    body=product_msg,
+                    from_=TWILIO_WHATSAPP_FROM,
+                    to=user_number
+                )
+        except Exception as e:
+            logger.exception("Failed to send product message for prod_id=%s: %s", prod_id, e)
 
+        # small delay between messages
         await asyncio.sleep(0.5)
 
-    # update offset
+    # --- Step 6: Update offset and optionally prompt for more ---
     new_offset = offset + PAGE_SIZE
     user_offsets[session_id] = new_offset
 
-    # show more if remaining
-    if new_offset < len(search_results):
-        twilio_client.messages.create(
-            body="Send more to see more products.",
-            from_=TWILIO_WHATSAPP_FROM,
-            to=user_number
-        )
+    if new_offset < len(normalized_results):
+        try:
+            twilio_client.messages.create(
+                body="Send 'more' to see more products.",
+                from_=TWILIO_WHATSAPP_FROM,
+                to=user_number
+            )
+        except Exception as e:
+            logger.exception("Failed to send 'more' prompt: %s", e)
 
+    # Empty TwiML ack to Twilio
     return Response(content="<Response></Response>", media_type="application/xml")
