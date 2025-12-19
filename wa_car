@@ -1,0 +1,242 @@
+import asyncio
+import os
+import json
+import logging
+from typing import Any, Dict, List
+
+from fastapi import FastAPI, Form, BackgroundTasks
+from fastapi.responses import Response
+from twilio.rest import Client
+from dotenv import load_dotenv
+
+# load .env
+load_dotenv()
+
+# -------------------------
+# Basic logging
+# -------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("whatsapp_webhook")
+
+# -------------------------
+# App + Twilio config
+# -------------------------
+app = FastAPI()
+
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+
+# *** YOUR TEMPLATE SID ***
+CAROUSEL_CONTENT_SID = "HX0cd36a7dfd8397ca2fa2082dde62dc6f"
+
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+# STRICTLY 3: This must match the number of cards in your Template
+PAGE_SIZE = int(os.getenv("PAGE_SIZE", "3"))
+
+# Image sizing config
+IMAGE_MAX_WIDTH = int(os.getenv("IMAGE_MAX_WIDTH", "1600"))
+IMAGE_QUALITY = int(os.getenv("IMAGE_QUALITY", "95"))
+
+def build_cdn_url(prod_id: str) -> str:
+    """
+    Build a high-resolution Next CDN image URL suffix.
+    """
+    if not prod_id:
+        return ""
+    return f"{prod_id}s.jpg?im=Resize,width={IMAGE_MAX_WIDTH},quality={IMAGE_QUALITY}"
+
+# -------------------------
+# Placeholder globals
+# -------------------------
+sessions: Dict[str, List[Any]] = {}
+graph_app = globals().get("graph_app")
+
+if graph_app is None:
+    class _FallbackGraphApp:
+        def invoke(self, state):
+            # Mock response for testing
+            return {
+                "response": {
+                    "assistant_message": "Here are the top products I found:",
+                    "search_results": [
+                       {"id": "F23438", "name": "Wallpaper", "category": "Samples", "price": 1.0, "url": "https://next.co.uk/style/SU613818/F23438"},
+                       {"id": "T63211", "name": "Velvet Shade", "category": "Lighting", "price": 27.0, "url": "https://next.co.uk/style/ST034975/T63211"},
+                       {"id": "AN5256", "name": "Cotton Cushion", "category": "Cushions", "price": 20.0, "url": "https://next.co.uk/style/SU567772/AN5256"}
+                    ]
+                }
+            }
+    graph_app = _FallbackGraphApp()
+
+# -------------------------
+# Helper: safe extractor for search_results
+# -------------------------
+def normalize_search_results(raw: Any) -> List[dict]:
+    out: List[dict] = []
+    if not raw: return out
+
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            if isinstance(v, dict):
+                meta = dict(v)
+                if not any(x in meta for x in ("productId", "product_id", "id", "key", "prod_id")):
+                    meta["product_id"] = k
+                out.append(meta)
+        return out
+
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                out.append(item)
+            elif isinstance(item, (list, tuple)) and item:
+                first = item[0]
+                if isinstance(first, dict):
+                    out.append(first)
+    return out
+
+# -------------------------
+# Helper: Send "Loading" Message
+# -------------------------
+def send_loading_message(user_number: str):
+    """Sends a text message immediately to defeat latency perception."""
+    try:
+        twilio_client.messages.create(
+            body="🔍 Finding the best products for you... please wait a moment.",
+            from_=TWILIO_WHATSAPP_FROM,
+            to=user_number
+        )
+    except Exception as e:
+        logger.error(f"Failed to send loading message: {e}")
+
+# -------------------------
+# Background Task Logic (Heavy Processing)
+# -------------------------
+def process_webhook_logic(Body: str, From: str, session_id: str):
+    user_number = From
+    logger.info("Processing logic for session_id=%s", session_id)
+
+    # --- Step 1: Restore chat history ---
+    existing_chat = sessions.get(session_id, [])
+    state = {
+        "session_id": session_id,
+        "user_message": Body,
+        "chat_history": existing_chat
+    }
+
+    # --- Step 2: Invoke graph_app (AI Agent) ---
+    try:
+        result = graph_app.invoke(state)
+    except Exception as e:
+        logger.exception("graph_app.invoke failed: %s", e)
+        return # Exit silently on error as requested
+
+    resp = result.get("response", {}) if isinstance(result, dict) else {}
+    
+    # Save history
+    try:
+        updated_chat = resp.get("updated_chat_history")
+        if isinstance(updated_chat, list):
+            sessions[session_id] = updated_chat
+    except Exception:
+        pass
+
+    # --- Step 3: Extract Results & Send Assistant Text ---
+    # Send the AI's text response first (e.g. "I found these blue curtains")
+    assistant_text = resp.get("assistant_message")
+    if assistant_text:
+        try:
+            twilio_client.messages.create(
+                body=assistant_text,
+                from_=TWILIO_WHATSAPP_FROM,
+                to=user_number
+            )
+        except Exception:
+            pass
+
+    # --- Step 4: Prepare Products (Top 3 Only) ---
+    raw_search_results = resp.get("search_results", [])
+    normalized_results = normalize_search_results(raw_search_results)
+    
+    # Slice exactly the top 3 items
+    products_to_send = normalized_results[:PAGE_SIZE]
+
+    if not products_to_send:
+        # No products found: We exit silently (as requested to remove "No more products")
+        return
+
+    # --- Step 5: Safety Padding (CRITICAL) ---
+    # We must fill exactly 3 cards (assuming PAGE_SIZE=3)
+    REQUIRED_CARDS = PAGE_SIZE
+    if len(products_to_send) < REQUIRED_CARDS and len(products_to_send) > 0:
+        while len(products_to_send) < REQUIRED_CARDS:
+            products_to_send.append(products_to_send[len(products_to_send) % len(products_to_send)])
+
+    # --- Step 6: Build Carousel Variables ---
+    content_variables = {}
+    current_var_index = 2
+    
+    for meta in products_to_send:
+        # Stop if we exceed variables for 3 cards (2-13)
+        if current_var_index > 13: 
+            break
+        
+        # Extract fields
+        prod_id = (meta.get("key") or meta.get("productId") or meta.get("product_id") or meta.get("id") or "")
+        name = meta.get("productName") or meta.get("title") or meta.get("name") or "Product"
+        category = meta.get("productCategory") or meta.get("category") or "General"
+        price = meta.get("price", "0.00")
+        url = meta.get("url") or meta.get("product_url") or ""
+
+        # Variable A: Image Suffix
+        content_variables[str(current_var_index)] = build_cdn_url(prod_id)
+        current_var_index += 1
+        
+        # Variable B: Title
+        content_variables[str(current_var_index)] = name[:30] + "..." if len(name) > 30 else name
+        current_var_index += 1
+        
+        # Variable C: Body
+        content_variables[str(current_var_index)] = f"£{price} | {category}"
+        current_var_index += 1
+        
+        # Variable D: Link Suffix
+        link_suffix = url.replace("https://www.next.co.uk/style/", "").replace("https://next.co.uk/style/", "")
+        content_variables[str(current_var_index)] = link_suffix
+        current_var_index += 1
+
+    # --- Step 7: Send Carousel ---
+    try:
+        twilio_client.messages.create(
+            content_sid=CAROUSEL_CONTENT_SID,
+            from_=TWILIO_WHATSAPP_FROM,
+            to=user_number,
+            content_variables=json.dumps(content_variables)
+        )
+        logger.info(f"Sent carousel to {user_number}")
+    except Exception as e:
+        logger.exception("Failed to send carousel: %s", e)
+
+# -------------------------
+# WhatsApp webhook
+# -------------------------
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(
+    background_tasks: BackgroundTasks, 
+    Body: str = Form(...), 
+    From: str = Form(...)
+):
+    """
+    Handle incoming WhatsApp webhook
+    """
+    session_id = (From.replace("whatsapp:", "") if From else "unknown")
+    logger.info("Webhook received session_id=%s", session_id)
+
+    # 1. IMMEDIATE RESPONSE: Send "Loading..." message
+    background_tasks.add_task(send_loading_message, From)
+
+    # 2. PROCESS LOGIC: Run the AI and Carousel logic in background
+    background_tasks.add_task(process_webhook_logic, Body, From, session_id)
+
+    # Return 200 OK instantly to Twilio
+    return Response(content="<Response></Response>", media_type="application/xml")
