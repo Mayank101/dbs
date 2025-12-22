@@ -1,0 +1,288 @@
+import asyncio
+import os
+import json
+import logging
+import random
+import time
+from typing import Any, Dict, List
+
+from fastapi import FastAPI, Form, BackgroundTasks
+from fastapi.responses import Response
+from twilio.rest import Client
+from dotenv import load_dotenv
+
+# load .env
+load_dotenv()
+
+# -------------------------
+# Configuration
+# -------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("whatsapp_webhook")
+
+app = FastAPI()
+
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+logger.info("Twilio client initialized, from=%s", TWILIO_WHATSAPP_FROM)
+
+# -------------------------
+# DYNAMIC TEMPLATES & CONFIG
+# -------------------------
+TEMPLATE_SIDS = {
+    2: "HX5c0ca19c79aa550301fa311403f6518a",
+    3: "HX0cd36a7dfd8397ca2fa2082dde62dc6f",
+    4: "HXfee1879cf2a8b515d1f56a27cbf656dd",
+    5: "HX7d603ea61c4bf0057f80936439e9576e",
+    10: "HX86b4c4d62a26a71dae214931b8855a51"
+}
+
+IMAGE_MAX_WIDTH = int(os.getenv("IMAGE_MAX_WIDTH", "1000"))
+IMAGE_QUALITY = int(os.getenv("IMAGE_QUALITY", "95"))
+
+# -------------------------
+# VERIFIED MOCK DATA (Fallback)
+# -------------------------
+MOCK_PRODUCTS = [
+    {"prod_id": "F23438", "productName": "Clarke & Clarke Wallpaper", "productCategory": "Samples", "price": 1.0, "url": "https://www.next.co.uk/style/SU613818/F23438"},
+    {"prod_id": "T63211", "productName": "Searchlight Velvet Shade", "productCategory": "Lighting", "price": 27.0, "url": "https://www.next.co.uk/style/ST034975/T63211"},
+    {"prod_id": "AN5256", "productName": "BHS Blue Cotton Cushion", "productCategory": "Cushions", "price": 20.0, "url": "https://www.next.co.uk/style/SU567772/AN5256"},
+    {"prod_id": "AA0795", "productName": "Bedeck Duvet Set", "productCategory": "Bedsets", "price": 85.0, "url": "https://www.next.co.uk/style/SU414279/AA0795"},
+    {"prod_id": "674456", "productName": "Chrome Shower Wiper", "productCategory": "Bathroom", "price": 7.0, "url": "https://www.next.co.uk/style/ST228209/674456"},
+    {"prod_id": "U73076", "productName": "Voyage Roman Blind", "productCategory": "Blinds", "price": 89.0, "url": "https://www.next.co.uk/style/SU063652/U73076"},
+    {"prod_id": "C99211", "productName": "Grey Large Rug", "productCategory": "Rugs", "price": 45.0, "url": "https://www.next.co.uk/style/SU772811/C99211"},
+    {"prod_id": "E55201", "productName": "Oak Effect Coffee Table", "productCategory": "Furniture", "price": 120.0, "url": "https://www.next.co.uk/style/SU441011/E55201"},
+    {"prod_id": "H11029", "productName": "Ceramic Flower Vase", "productCategory": "Decor", "price": 18.0, "url": "https://www.next.co.uk/style/SU110292/H11029"},
+    {"prod_id": "K99201", "productName": "Metal Wall Clock", "productCategory": "Home", "price": 35.0, "url": "https://www.next.co.uk/style/SU992011/K99201"},
+    {"prod_id": "559757", "productName": "Egyptian Cotton Towel", "productCategory": "Bathroom", "price": 10.0, "url": "https://www.next.co.uk/style/st276848/559757"},
+    {"prod_id": "919896", "productName": "Navy Blackout Curtains", "productCategory": "Curtains", "price": 40.0, "url": "https://www.next.co.uk/g76219s12/919896"},
+    {"prod_id": "U11866", "productName": "Plush Faux Fur Throw", "productCategory": "Throws", "price": 50.0, "url": "https://www.next.co.uk/style/st418210/u11866"},
+    {"prod_id": "206658", "productName": "Set of 4 Nova Glasses", "productCategory": "Kitchen", "price": 14.0, "url": "https://www.next.co.uk/style/st805628/206658"},
+    {"prod_id": "466034", "productName": "Gold Marble Table Lamp", "productCategory": "Lighting", "price": 200.0, "url": "https://www.next.co.uk/style/st594836/466034"}
+]
+
+# -------------------------
+# Placeholder for Graph App
+# -------------------------
+sessions: Dict[str, List[Any]] = {}
+graph_app = globals().get("graph_app")
+
+if graph_app is None:
+    # If no real graph_app exists, we create a dummy one that ALWAYS FAILS
+    # to test the fallback logic.
+    class _FallbackGraphApp:
+        def invoke(self, state):
+            # Simulate API failure or empty results
+            # raise Exception("API Down") 
+            return {"response": {"assistant_message": "Checking inventory...", "search_results": []}}
+    graph_app = _FallbackGraphApp()
+
+# -------------------------
+# Helper Functions
+# -------------------------
+def build_cdn_url(prod_id: str) -> str:
+    if not prod_id: return ""
+    return f"{prod_id}s.jpg?im=Resize,width={IMAGE_MAX_WIDTH},quality={IMAGE_QUALITY}"
+
+def normalize_search_results(raw: Any) -> List[dict]:
+    """Standardize API results into a flat list of dicts."""
+    out: List[dict] = []
+    if not raw: return out
+
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            if isinstance(v, dict):
+                meta = dict(v)
+                if not any(x in meta for x in ("productId", "product_id", "id", "key", "prod_id")):
+                    meta["product_id"] = k
+                out.append(meta)
+        return out
+
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                out.append(item)
+            elif isinstance(item, (list, tuple)) and item:
+                first = item[0]
+                if isinstance(first, dict):
+                    out.append(first)
+    return out
+
+# -------------------------
+# Background Logic (The Core)
+# -------------------------
+def process_webhook_logic(Body: str, From: str, start_time: float):
+    session_id = (From.replace("whatsapp:", "") if From else "unknown")
+    user_number = From
+    
+    logger.info(f"Processing session_id={session_id}")
+
+    # --- Step 1: Restore Chat History ---
+    existing_chat = sessions.get(session_id, [])
+    state = {
+        "session_id": session_id,
+        "user_message": Body,
+        "chat_history": existing_chat
+    }
+
+    products_found = []
+    assistant_message = ""
+    used_fallback = False
+
+    # --- Step 2: Call Real API (Graph App) ---
+    try:
+        logger.info("Invoking graph_app...")
+        result = graph_app.invoke(state)
+        
+        # Parse Response
+        resp = result.get("response", {}) if isinstance(result, dict) else {}
+        
+        # Save History
+        updated_chat = resp.get("updated_chat_history")
+        if isinstance(updated_chat, list):
+            sessions[session_id] = updated_chat
+            
+        # Get Message & Products
+        assistant_message = resp.get("assistant_message") or "Here are the products I found:"
+        raw_results = resp.get("search_results", [])
+        products_found = normalize_search_results(raw_results)
+        
+        logger.info(f"API returned {len(products_found)} products.")
+
+    except Exception as e:
+        logger.error(f"Graph App Failed: {e}")
+        # If API fails, we will trigger fallback below
+        products_found = []
+
+    # --- Step 3: Check Fallback Logic ---
+    if not products_found:
+        logger.warning("No products found from API (or API failed). Using MOCK DATA fallback.")
+        used_fallback = True
+        
+        # Shuffle mock data for variety
+        shuffled = MOCK_PRODUCTS[:]
+        random.shuffle(shuffled)
+        
+        # Simulate finding 3-5 products
+        count = random.randint(3, 10) 
+        products_found = shuffled[:count]
+        
+        assistant_message = "I couldn't reach the live inventory, but here are some popular items you might like!"
+
+    # --- Step 4: Determine Template Size ---
+    count = len(products_found)
+    
+    if count >= 10:
+        selected_sid = TEMPLATE_SIDS[10]
+        slice_limit = 10
+    elif count >= 5:
+        selected_sid = TEMPLATE_SIDS[5]
+        slice_limit = 5
+    elif count >= 4:
+        selected_sid = TEMPLATE_SIDS[4]
+        slice_limit = 4
+    elif count >= 3:
+        selected_sid = TEMPLATE_SIDS[3]
+        slice_limit = 3
+    else:
+        # Fallback for 1 or 2 products
+        selected_sid = TEMPLATE_SIDS[2]
+        slice_limit = 2
+
+    # --- Step 5: Slice & Pad Data ---
+    products_to_send = products_found[:slice_limit]
+    
+    # Padding: Fill empty slots if we chose a template larger than the list
+    while len(products_to_send) < slice_limit:
+        products_to_send.append(products_to_send[0])
+
+    logger.info(f"Sending Template: {selected_sid} with {slice_limit} cards")
+
+    # --- Step 6: Build Variables ---
+    content_variables = {}
+    current_var_index = 2
+    max_var_index = (slice_limit * 4) + 1
+
+    for p in products_to_send:
+        if current_var_index > max_var_index: break
+        
+        # Normalize keys (API might use different keys than Mock)
+        p_id = p.get("prod_id") or p.get("productId") or p.get("key") or ""
+        p_name = p.get("productName") or p.get("name") or "Product"
+        p_cat = p.get("productCategory") or p.get("category") or "General"
+        p_price = p.get("price", "0.00")
+        p_url = p.get("url") or p.get("product_url") or ""
+
+        # Variable A: Image
+        content_variables[str(current_var_index)] = build_cdn_url(p_id)
+        current_var_index += 1
+        
+        # Variable B: Title
+        content_variables[str(current_var_index)] = p_name[:30] + "..." if len(p_name) > 30 else p_name
+        current_var_index += 1
+        
+        # Variable C: Body
+        content_variables[str(current_var_index)] = f"£{p_price} | {p_cat}"
+        current_var_index += 1
+        
+        # Variable D: Link
+        link_suffix = p_url.replace("https://www.next.co.uk/style/", "").replace("https://next.co.uk/style/", "")
+        content_variables[str(current_var_index)] = link_suffix
+        current_var_index += 1
+
+    # --- Step 7: Send Carousel (FIRST) ---
+    try:
+        twilio_client.messages.create(
+            content_sid=selected_sid,
+            from_=TWILIO_WHATSAPP_FROM,
+            to=user_number,
+            content_variables=json.dumps(content_variables)
+        )
+        logger.info("Carousel sent successfully.")
+    except Exception as e:
+        logger.error(f"Failed to send carousel: {e}")
+        # If carousel fails, we don't want to wait 3s for nothing
+        return
+
+    # --- Step 8: Safety Delay (3s) ---
+    # Wait for images to render on user's phone before sending text
+    logger.info("Waiting 3s for carousel render...")
+    time.sleep(3.0)
+
+    # --- Step 9: Send Assistant Message (SECOND) ---
+    try:
+        twilio_client.messages.create(
+            body=assistant_message,
+            from_=TWILIO_WHATSAPP_FROM,
+            to=user_number
+        )
+        logger.info("Assistant message sent.")
+    except Exception as e:
+        logger.error(f"Failed to send text: {e}")
+
+    # Log total time
+    duration = time.time() - start_time
+    logger.info(f"✅ Transaction Complete in {duration:.2f}s")
+
+# -------------------------
+# Webhook Endpoint
+# -------------------------
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(
+    background_tasks: BackgroundTasks, 
+    Body: str = Form(...), 
+    From: str = Form(...)
+):
+    start_time = time.time()
+    logger.info(f"Msg received from {From}")
+    
+    # Send loading message immediately (Optional, but recommended)
+    # background_tasks.add_task(send_loading_message, From) # Uncomment if defined
+    
+    # Process everything in background
+    background_tasks.add_task(process_webhook_logic, Body, From, start_time)
+    
+    return Response(content="<Response></Response>", media_type="application/xml")
