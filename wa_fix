@@ -1,0 +1,50 @@
+import logging
+import time
+from fastapi import FastAPI, Form, BackgroundTasks, Request
+from fastapi.responses import Response
+from dotenv import load_dotenv
+
+# Import logic from your new utils file
+from whatsapp_utils import process_webhook_logic, validate_twilio_request
+
+load_dotenv()
+
+# Setup Logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("whatsapp_webhook")
+
+app = FastAPI()
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks, 
+    Body: str = Form(...), 
+    From: str = Form(...),
+    MessageSid: str = Form(...) 
+):
+    # --- 🔎 LOG ALL IP ADDRESSES ---
+    client_host = request.client.host
+    forwarded_for = request.headers.get("x-forwarded-for")
+    real_ip = request.headers.get("x-real-ip")
+    
+    # Logic to find the FIRST ip if forwarded_for exists
+    true_source_ip = forwarded_for.split(",")[0].strip() if forwarded_for else client_host
+
+    print(f"========== 🌍 INCOMING CONNECTION INFO ==========")
+    print(f"Direct Client Host (Usually Proxy/Ngrok): {client_host}")
+    print(f"X-Forwarded-For (Twilio IPs should be here): {forwarded_for}")
+    print(f"X-Real-IP: {real_ip}")
+    print(f"REAL SOURCE IP (Extracted): {true_source_ip}")
+    print("=================================================")
+
+    # 1. SECURITY CHECK (Uncomment when ready)
+    # await validate_twilio_request(request) 
+
+    start_time = time.time()
+    logger.info(f"Msg from {From}")
+    
+    # Pass data to the logic function imported from utils
+    background_tasks.add_task(process_webhook_logic, Body, From, start_time, MessageSid)
+    
+    return Response(content="<Response></Response>", media_type="application/xml")
