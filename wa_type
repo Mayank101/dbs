@@ -214,3 +214,48 @@ async def whatsapp_webhook(
     background_tasks.add_task(process_webhook_logic, Body, From, start_time, MessageSid)
     
     return Response(content="<Response></Response>", media_type="application/xml")
+
+
+
+Domain,Type,Notes
+accounts.twilio.com,API Endpoint,Authentication and Account Management
+api.twilio.com,API Endpoint,Core API (Calls, Messages, etc.)
+api.dublin.ie1.twilio.com,API Endpoint,Regional Core API (EU/Ireland)
+api.sydney.au1.twilio.com,API Endpoint,Regional Core API (APAC/Australia)
+api.ashburn.us1.twilio.com,API Endpoint,Regional Core API (US East)
+bulkexports.twilio.com,API Endpoint,Bulk Export API
+chat.twilio.com,API Endpoint,Programmable Chat (Legacy)
+console.twilio.com,Web Interface,Twilio Console (Referenced in docs)
+content.twilio.com,API Endpoint,Content API
+conversations.twilio.com,API Endpoint,Conversations API
+email.twilio.com,API Endpoint,Twilio Email / SendGrid Integration
+events.twilio.com,API Endpoint,Event Streams
+flex-api.twilio.com,API Endpoint,Flex Contact Center API
+insights.twilio.com,API Endpoint,Call & TaskRouter Insights
+ip-messaging.twilio.com,API Endpoint,IP Messaging (Legacy reference)
+lookups.twilio.com,API Endpoint,Phone Number Lookups
+mcs.us1.twilio.com,API Endpoint,Media Conversion Service (US1)
+media.twilio.com,API Endpoint,Media Storage API
+messaging.twilio.com,API Endpoint,Messaging Services API
+microvisor.twilio.com,API Endpoint,Microvisor IoT API
+monitor.twilio.com,API Endpoint,Monitor/Alerts API
+numbers.twilio.com,API Endpoint,Phone Numbers API
+preview.twilio.com,API Endpoint,Developer Preview / Beta APIs
+pricing.twilio.com,API Endpoint,Pricing Information
+proxy.twilio.com,API Endpoint,Proxy API
+routes.twilio.com,API Endpoint,SIP Routes
+serverless.twilio.com,API Endpoint,Twilio Functions/Serverless
+studio.twilio.com,API Endpoint,Studio Flow API
+supersim.twilio.com,API Endpoint,Super SIM API
+sync.twilio.com,API Endpoint,Sync State API
+taskrouter.twilio.com,API Endpoint,TaskRouter API
+trunking.twilio.com,API Endpoint,SIP Trunking
+twimlets.com,Utility Service,Hosted TwiML utilities (echo, hold music, etc.)
+verify.twilio.com,API Endpoint,Verify / 2FA API
+video.twilio.com,API Endpoint,Programmable Video
+voice.twilio.com,API Endpoint,Voice API
+wireless.twilio.com,API Endpoint,Wireless / IoT
+www.twilio.com,Website,Documentation and Marketing
+twilio.org,Website,Twilio.org (Social Impact) - Documentation refs
+github.com,Source Control,Repository hosting (Installation/Setup)
+pypi.org,Package Repo,Python Package Index (Installation)
