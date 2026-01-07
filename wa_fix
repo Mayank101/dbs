@@ -48,3 +48,101 @@ async def whatsapp_webhook(
     background_tasks.add_task(process_webhook_logic, Body, From, start_time, MessageSid)
     
     return Response(content="<Response></Response>", media_type="application/xml")
+
+
+
+
+
+Customer (External and Internal)
+
+Goal Title: Supervisor Feedback
+
+Target / Measure of Success
+
+Success was measured through ownership of responsibilities, quality of delivery, consistency over time, and effective collaboration with the Project Manager and People Manager.
+
+Achievement Summary
+
+Over the last five months, I established myself as a dependable contributor by taking ownership of defined AI and Data Science workstreams and sustaining delivery momentum across a long-running client initiative. I led specific integration components such as WhatsApp integration and backend setup, contributed to solution architecture and design discussions, and supported the creation of architecture diagrams and major client presentations. I maintained regular alignment with the Project Manager and People Manager, actively incorporated feedback, and ensured steady progress through development, testing, and stabilization phases.
+
+⸻
+
+Goal Title: Client Feedback
+
+Target / Measure of Success
+
+Success was measured through the quality of solutions delivered and the effectiveness of technical support provided for client-facing discussions and outcomes.
+
+Achievement Summary
+
+While most direct client interactions were led by the Project Manager, I played a key role in shaping client-facing outcomes throughout the project lifecycle. I supported client discussions by preparing solution architecture diagrams, technical walkthroughs, and detailed presentations explaining the GenAI chatbot design, integrations, and progress. During the current testing and refinement phase, I have continued to analyse client feedback, propose changes, and implement improvements in coordination with the team, contributing to clear and confident client communication.
+
+⸻
+
+People / Learning and Growth
+
+Goal Title: Attrition
+
+Target / Measure of Success
+
+Success was measured through maintaining team stability, collaboration, and continuity during delivery-intensive phases.
+
+Achievement Summary
+
+As part of a lean team, I contributed to maintaining stability by actively supporting peers and junior resources during critical delivery phases. I helped unblock technical issues, clarified requirements, and shared ownership during tight timelines. This approach helped reduce delivery risks, maintain momentum, and foster a collaborative and supportive team environment.
+
+⸻
+
+Goal Title: Development and Capability Building
+
+Target / Measure of Success
+
+Success was measured through continuous skill development, mentoring, and contribution to overall team capability.
+
+Achievement Summary
+
+I focused on strengthening both my technical depth and my contribution to team capability. I deepened my expertise in applied AI, Generative AI solution design, FastAPI-based backend development, and time series forecasting. In parallel, I mentored junior team members, participated in interviews for a Full Stack Designer role, and closely supported frontend and full stack developers in designing and implementing the end-to-end solution, ensuring strong alignment between backend intelligence and user experience.
+
+⸻
+
+Project Delivery
+
+Goal Title: Finish Projects
+
+Target / Measure of Success
+
+Success was measured through timely and high-quality progress across project phases, from development to testing and stabilization.
+
+Achievement Summary
+
+I have been actively involved for the past five months in a GenAI-based chatbot initiative for a retail client, working collaboratively with another team member across the full solution lifecycle. While development was shared, I took lead ownership of key areas including backend setup, WhatsApp integration using Twilio, and major system integrations. I was also key in defining the solution architecture, creating architecture diagrams, and supporting major client presentations. The project is currently in the final stages of testing and refinement based on client feedback.
+
+In parallel, I contributed to a demand forecasting initiative for the same client using time series models, supporting data preparation, modelling, validation, and interpretation. Both initiatives progressed with a strong focus on quality, scalability, and readiness for production use.
+
+⸻
+
+Strategic
+
+Goal Title: Firm Development and Strategic Initiatives
+
+Target / Measure of Success
+
+Success was measured through contributions to reusable assets, knowledge sharing, and support for future business opportunities.
+
+Achievement Summary
+
+Beyond immediate project delivery, I contributed to longer-term firm value by helping shape reusable architecture patterns, documentation, and presentation materials derived from the GenAI chatbot implementation. I worked with project leadership to identify opportunities where these solutions could be extended or reused across similar retail use cases, supporting future engagements and internal knowledge reuse.
+
+⸻
+
+Internal Business Process / Operational Excellence
+
+Goal Title: Compliance
+
+Target / Measure of Success
+
+Success was measured through adherence to organisational policies, mandatory trainings, and client-specific compliance requirements.
+
+Achievement Summary
+
+I consistently followed organisational policies, client-specific requirements, and data governance standards throughout my work. I completed all mandatory trainings within defined timelines and ensured compliance across data handling, API usage, documentation, and delivery practices, contributing to smooth, risk-free execution.
