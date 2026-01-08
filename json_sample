@@ -1,0 +1,120 @@
+products_data = {
+    "u41645": {
+        "product_name": "Fusion Blue Beach Huts Easycare Duvet Cover Set",
+        "product_price": "£18 - £30",
+        "description": "Take a deep breath of salty seaside air and get ready to relax where the seagulls play. Featuring a parade of brightly coloured beach huts, this coastal-themed design is manufactured from easy-care polycotton – the perfect place to drift off while conjuring the sound of the waves. Machine washable. 52% Polyester, 48% Cotton.",
+        "page_link": "https://www.next.co.uk/style/su253897/u41645",
+        "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/u41645.jpg",
+        "you_may_also_like": {
+            "n70904": {
+                "product_name": "Fusion Natural Beach Huts Easycare Duvet Cover Set",
+                "product_price": "£20 - £35",
+                "page_link": "https://www.next.co.uk/search?w=Fusion+Natural+Beach+Huts+Easycare+Duvet+Cover+Set",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/n70904.jpg"
+            },
+            "n14544": {
+                "product_name": "Fusion Blue Fairhaven Easycare Duvet Cover Set",
+                "product_price": "£18 - £35",
+                "page_link": "https://www.next.co.uk/search?w=Fusion+Blue+Fairhaven+Easycare+Duvet+Cover+Set",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/n14544.jpg"
+            },
+            "t92837": {
+                "product_name": "Fusion Multi Rhett Textured Duvet Cover Set",
+                "product_price": "£25 - £50",
+                "page_link": "https://www.next.co.uk/search?w=Fusion+Multi+Rhett+Textured+Duvet+Cover+Set",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/t92837.jpg"
+            },
+            "t67890": {
+                 "product_name": "Fusion Blue/Beige Betley Duvet Cover and Pillowcase Set",
+                 "product_price": "£18 - £35",
+                 "page_link": "https://www.next.co.uk/search?w=Fusion+Blue+Beige+Betley+Duvet+Cover+Set",
+                 "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/t67890.jpg"
+            }
+        },
+        "customers_also_bought": {
+            "m11223": {
+                "product_name": "Fusion Multi Evelyn Reversible Duvet Cover Set",
+                "product_price": "£20 - £40",
+                "page_link": "https://www.next.co.uk/search?w=Fusion+Multi+Evelyn+Reversible+Duvet+Cover+Set",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/m11223.jpg"
+            },
+            "m44556": {
+                "product_name": "Fusion Duck Egg Daisy Peach Finish Duvet Cover Set",
+                "product_price": "£17 - £29",
+                "page_link": "https://www.next.co.uk/search?w=Fusion+Duck+Egg+Daisy+Peach+Finish+Duvet+Cover+Set",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/m44556.jpg"
+            },
+            "m77889": {
+                "product_name": "Fusion Navy Cosmic Star Sherpa Reverse Duvet Cover Set",
+                "product_price": "£25 - £50",
+                "page_link": "https://www.next.co.uk/search?w=Fusion+Navy+Cosmic+Star+Sherpa+Reverse+Duvet+Cover+Set",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/m77889.jpg"
+            },
+            "m67890": {
+                "product_name": "Fusion Duck Egg Cute Dogs Easycare Duvet Cover Set",
+                "product_price": "£20 - £35",
+                "page_link": "https://www.next.co.uk/search?w=Fusion+Duck+Egg+Cute+Dogs+Easycare+Duvet+Cover+Set",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/m67890.jpg"
+            }
+        }
+    },
+    "k95601": {
+        "product_name": "Vintaged Faux Leather Light Brown Flinton High Back Wooden Accent Chair",
+        "product_price": "£475",
+        "description": "Our best-selling Flinton Chair in a higher-backed version, featuring metal arms and foot caps. This deep cushioned chair is the perfect balance of form and function. Requires self-assembly. Dimensions: Height 104cm Width 71.5cm Depth 91cm.",
+        "page_link": "https://www.next.co.uk/style/st182862/k95601",
+        "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/k95601.jpg",
+        "you_may_also_like": {
+            "w30816": {
+                "product_name": "Tweedy Plain Light Natural Flinton High Back Wooden Accent Chair",
+                "product_price": "£475",
+                "page_link": "https://www.next.co.uk/search?w=Tweedy+Plain+Light+Natural+Flinton+High+Back+Wooden+Accent+Chair",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/w30816.jpg"
+            },
+            "f98511": {
+                "product_name": "Soft Velvet Rust Brown Flinton High Back Wooden Accent Chair",
+                "product_price": "£475",
+                "page_link": "https://www.next.co.uk/search?w=Soft+Velvet+Rust+Brown+Flinton+High+Back+Wooden+Accent+Chair",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/f98511.jpg"
+            },
+            "d91483": {
+                "product_name": "Vintaged Faux Leather Light Brown Flinton Wooden Accent Chair",
+                "product_price": "£425",
+                "page_link": "https://www.next.co.uk/search?w=Vintaged+Faux+Leather+Light+Brown+Flinton+Wooden+Accent+Chair",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/d91483.jpg"
+            },
+            "h20238": {
+                "product_name": "Plush Chenille Light Natural Flinton Wooden Accent Chair",
+                "product_price": "£375",
+                "page_link": "https://www.next.co.uk/search?w=Plush+Chenille+Light+Natural+Flinton+Wooden+Accent+Chair",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/h20238.jpg"
+            }
+        },
+        "customers_also_bought": {
+            "n57554": {
+                "product_name": "Plush Chenille Slate Blue Flinton Wooden Accent Chair",
+                "product_price": "£375",
+                "page_link": "https://www.next.co.uk/search?w=Plush+Chenille+Slate+Blue+Flinton+Wooden+Accent+Chair",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/n57554.jpg"
+            },
+            "m63147": {
+                "product_name": "Plush Chenille Moss Green Flinton Wooden Accent Chair",
+                "product_price": "£375",
+                "page_link": "https://www.next.co.uk/search?w=Plush+Chenille+Moss+Green+Flinton+Wooden+Accent+Chair",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/m63147.jpg"
+            },
+            "f66222": {
+                "product_name": "Alaska Faux Fur Leopard Flinton Wooden Accent Chair",
+                "product_price": "£399",
+                "page_link": "https://www.next.co.uk/search?w=Alaska+Faux+Fur+Leopard+Flinton+Wooden+Accent+Chair",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/f66222.jpg"
+            },
+            "h20239": {
+                "product_name": "Soft Velvet Navy Blue Flinton Wooden Accent Chair",
+                "product_price": "£350",
+                "page_link": "https://www.next.co.uk/search?w=Soft+Velvet+Navy+Blue+Flinton+Wooden+Accent+Chair",
+                "image_link": "https://xcdn.next.co.uk/common/items/default/default/itemimages/search/224x336/h20239.jpg"
+            }
+        }
+    }
+}
