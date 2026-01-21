@@ -1,0 +1,241 @@
+import os
+import json
+import time
+import numpy as np
+import faiss
+from PIL import Image
+from tqdm import tqdm
+import concurrent.futures
+
+# --- GOOGLE LIBRARIES ---
+import vertexai
+from vertexai.generative_models import GenerativeModel, Part, GenerationConfig
+from vertexai.vision_models import MultiModalEmbeddingModel, Image as VertexImage
+
+# ==========================================
+# ⚙️ CONFIGURATION
+# ==========================================
+PROJECT_ID = "YOUR_PROJECT_ID"  # <--- UPDATE THIS
+LOCATION = "us-central1"
+CATALOG_FILE = "master_catalog.json"
+IMAGES_DIR = "my_products"
+SCENE_IMAGE = "scene.jpg"
+INPUT_PRODUCT_ID = "PROD_101" # The Main Product context
+MAX_WORKERS = 10 # Number of parallel threads for indexing (Speed limit)
+
+# Initialize Google Cloud
+print(f"⏳ Connecting to Google Cloud Project: {PROJECT_ID}...")
+try:
+    vertexai.init(project=PROJECT_ID, location=LOCATION)
+except Exception as e:
+    print(f"❌ Auth Error: {e}")
+    print("Did you run: export GOOGLE_APPLICATION_CREDENTIALS='key.json'?")
+    exit()
+
+# ==========================================
+# 1. DATA LOADER
+# ==========================================
+def load_catalog(file_path):
+    if not os.path.exists(file_path):
+        print(f"❌ Error: {file_path} not found.")
+        return {}
+    with open(file_path, "r") as f:
+        return json.load(f)
+
+# ==========================================
+# 2. GOOGLE AI CLIENT
+# ==========================================
+class GoogleAIClient:
+    def __init__(self):
+        self.embedder = MultiModalEmbeddingModel.from_pretrained("multimodalembedding")
+        self.detector = GenerativeModel("gemini-2.0-flash-exp")
+
+    def get_embedding(self, pil_image):
+        """Converts PIL image to 1408-dim vector."""
+        # Save temp file for Vertex
+        timestamp = int(time.time() * 1000)
+        temp_path = f"temp_{timestamp}.jpg"
+        
+        try:
+            pil_image.save(temp_path)
+            v_img = VertexImage.load_from_file(temp_path)
+            emb = self.embedder.get_embeddings(image=v_img)
+            
+            # Normalize
+            vec = np.array(emb.image_embedding, dtype='float32')
+            norm = np.linalg.norm(vec)
+            if norm == 0: return None
+            return vec / norm
+        except Exception as e:
+            # Silent fail for huge batch processing, just return None
+            return None
+        finally:
+            if os.path.exists(temp_path): os.remove(temp_path)
+
+    def detect_items(self, image_path, context_name):
+        with open(image_path, "rb") as f: img_bytes = f.read()
+        
+        prompt = f"""
+        CONTEXT: User is viewing a "{context_name}". IGNORE IT.
+        TASK: Detect upsell items (lamps, rugs, art, chairs).
+        RETURN JSON: {{"items": [{{"label": "string", "box_2d": [ymin, xmin, ymax, xmax]}}]}}
+        Use 0-1000 scale.
+        """
+        
+        try:
+            response = self.detector.generate_content(
+                [Part.from_data(img_bytes, mime_type="image/jpeg"), prompt],
+                generation_config=GenerationConfig(response_mime_type="application/json")
+            )
+            return json.loads(response.text).get("items", [])
+        except Exception as e:
+            print(f"❌ Gemini Error: {e}")
+            return []
+
+# ==========================================
+# 3. DATABASE ENGINE (Parallelized)
+# ==========================================
+class InventoryDB:
+    def __init__(self, google_client, catalog_data):
+        self.client = google_client
+        self.catalog = catalog_data
+        self.dimension = 1408
+        self.index = faiss.IndexFlatIP(self.dimension) 
+        self.meta_map = {} 
+        self.current_id = 0
+
+    def _process_single_image(self, args):
+        """Helper for parallel processing"""
+        prod_id, img_path = args
+        try:
+            img = Image.open(img_path).convert("RGB")
+            vector = self.client.get_embedding(img)
+            return (vector, prod_id, os.path.basename(img_path))
+        except:
+            return None
+
+    def build_index_fast(self, root_folder):
+        """Multi-threaded Indexer for 15k images"""
+        print(f"\n🚀 Starting Parallel Indexing (Threads: {MAX_WORKERS})...")
+        
+        # 1. Collect all valid image paths
+        tasks = []
+        for prod_id in os.listdir(root_folder):
+            if prod_id in self.catalog:
+                prod_dir = os.path.join(root_folder, prod_id)
+                if os.path.isdir(prod_dir):
+                    for f in os.listdir(prod_dir):
+                        if f.lower().endswith(('jpg', 'png', 'jpeg')):
+                            tasks.append((prod_id, os.path.join(prod_dir, f)))
+
+        print(f"   Found {len(tasks)} images to process.")
+
+        # 2. Run in Parallel
+        vectors_to_add = []
+        metadata_to_add = []
+
+        # tqdm creates the progress bar [||||||||||] 100%
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            results = list(tqdm(executor.map(self._process_single_image, tasks), total=len(tasks)))
+
+        # 3. Add successful results to DB
+        for res in results:
+            if res and res[0] is not None:
+                vector, prod_id, filename = res
+                vectors_to_add.append(vector)
+                
+                # Metadata
+                metadata_to_add.append({
+                    "sku": prod_id,
+                    "name": self.catalog[prod_id]['name'],
+                    "price": self.catalog[prod_id]['price'],
+                    "category": self.catalog[prod_id]['category'],
+                    "filename": filename
+                })
+
+        # 4. Batch Add to FAISS
+        if vectors_to_add:
+            self.index.add(np.array(vectors_to_add))
+            # Rebuild map based on index order
+            for i, meta in enumerate(metadata_to_add):
+                self.meta_map[i] = meta
+            
+            print(f"✅ Indexing Complete. Total Vectors: {self.index.ntotal}")
+        else:
+            print("❌ No images indexed.")
+
+    def search_top_k(self, vector, k=5):
+        if self.index.ntotal == 0: return []
+        D, I = self.index.search(np.array([vector]), k)
+        
+        matches = []
+        for j in range(k):
+            match_idx = I[0][j]
+            score = D[0][j]
+            if score > 0.60 and match_idx in self.meta_map:
+                data = self.meta_map[match_idx]
+                matches.append({
+                    "rank": j + 1,
+                    "sku": data['sku'],
+                    "name": data['name'],
+                    "price": data['price'],
+                    "score": float(f"{score:.3f}")
+                })
+        return matches
+
+# ==========================================
+# 4. PIPELINE LOGIC
+# ==========================================
+def run_pipeline():
+    # Setup
+    catalog = load_catalog(CATALOG_FILE)
+    client = GoogleAIClient()
+    db = InventoryDB(client, catalog)
+    
+    # Build Index (Parallel)
+    db.build_index_fast(IMAGES_DIR)
+    
+    # Process Scene
+    if not os.path.exists(SCENE_IMAGE):
+        print(f"Please add {SCENE_IMAGE}")
+        return
+
+    # Context Lookup
+    context_name = catalog.get(INPUT_PRODUCT_ID, {}).get("name", "Furniture")
+    print(f"\n🧠 Context: Ignoring '{context_name}'...")
+
+    # Detect
+    items = client.detect_items(SCENE_IMAGE, context_name)
+    print(f"   Found {len(items)} items. Searching inventory...")
+    
+    final_results = []
+    original_img = Image.open(SCENE_IMAGE)
+    w, h = original_img.size
+
+    for item in items:
+        label = item['label']
+        ymin, xmin, ymax, xmax = item['box_2d']
+        
+        # Crop
+        crop = original_img.crop((int(xmin/1000*w), int(ymin/1000*h), int(xmax/1000*w), int(ymax/1000*h)))
+        
+        # Embed & Search
+        vector = client.get_embedding(crop)
+        if vector is not None:
+            matches = db.search_top_k(vector, k=5)
+            if matches:
+                final_results.append({
+                    "detected_label": label,
+                    "coordinates": {"top": ymin/1000, "left": xmin/1000, "width": (xmax-xmin)/1000, "height": (ymax-ymin)/1000},
+                    "matches": matches
+                })
+                print(f"   ✅ {label} -> {len(matches)} matches (Top: {matches[0]['name']} - ${matches[0]['price']})")
+            else:
+                print(f"   ⚠️ {label} -> No inventory match.")
+
+    # Dump JSON
+    print("\n🚀 FINAL OUTPUT:")
+    print(json.dumps(final_results, indent=2))
+
+if __name__ == "__main__":
+    run_pipeline()
