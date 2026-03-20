@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FINDR</title>
+    <style>
+        /* Base Reset and Typography */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 40px; color: #333; background-color: #fafafa; }
+        header { text-align: center; font-size: 2.5rem; font-weight: bold; letter-spacing: 2px; margin-bottom: 40px; text-transform: uppercase; }
+
+        /* Main Layout Container */
+        .container { display: flex; gap: 40px; max-width: 1400px; margin: 0 auto; align-items: flex-start; }
+
+        /* Left Column */
+        .left-column { flex: 1; display: flex; flex-direction: column; gap: 20px; position: sticky; top: 40px; max-width: 450px; }
+        
+        .dropdown { width: 100%; padding: 15px 20px; font-size: 1.1rem; border: 1px solid #ddd; border-radius: 8px; background-color: #fff; cursor: pointer; appearance: none; background-image: linear-gradient(45deg, transparent 50%, #888 50%), linear-gradient(135deg, #888 50%, transparent 50%); background-position: calc(100% - 20px) calc(1em + 2px), calc(100% - 15px) calc(1em + 2px); background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        .dropdown:focus { outline: none; border-color: #aaa; }
+
+        .main-display { width: 100%; height: 600px; background-color: #fff; border: 1px solid #eee; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.04); display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 20px; }
+        .main-display img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; display: none; }
+        .placeholder-text { color: #888; font-style: italic; }
+
+        /* Right Column (Flow Container) */
+        .right-column { flex: 2; display: flex; flex-direction: column; gap: 25px; max-height: 850px; overflow-y: auto; padding-right: 15px; }
+
+        /* Individual Flow Row */
+        .flow-row { display: flex; align-items: center; gap: 20px; width: 100%; }
+
+        /* Inputs (Cutouts) - NOW INSIDE A BOX */
+        .input-group { 
+            display: flex; 
+            flex-direction: row; 
+            flex-wrap: wrap; 
+            gap: 15px; 
+            justify-content: center; 
+            align-items: center;
+            background-color: #fff; 
+            border: 1px solid #ccc; /* Creates the outer box */
+            border-radius: 12px; 
+            padding: 15px; 
+            min-height: 160px; /* Matches the height of the output box */
+        }
+        
+        .cutout-img { width: 120px; height: 120px; background-color: #fff; border: 1px solid #eee; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); object-fit: contain; padding: 10px; transition: transform 0.2s; flex-shrink: 0; }
+        .cutout-img:hover { transform: scale(1.05); }
+
+        /* Arrow */
+        .arrow { font-size: 2.5rem; color: #888; font-weight: bold; flex-shrink: 0; }
+
+        /* Outputs (Matches) */
+        .output-group { flex: 1; background-color: #fff; border: 1px dashed #ccc; border-radius: 12px; display: flex; align-items: flex-start; justify-content: flex-start; min-height: 160px; padding: 15px; gap: 15px; overflow-x: auto; }
+        
+        .match-item { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 120px; flex-shrink: 0; text-decoration: none; transition: transform 0.2s; }
+        .match-item:hover { transform: scale(1.02); }
+        .match-img { width: 120px; height: 120px; object-fit: contain; border-radius: 8px; border: 1px solid #eee; background: #fff; padding: 5px; }
+        
+        .match-name { 
+            font-size: 0.85rem; 
+            color: #444; 
+            text-align: center; 
+            line-height: 1.2;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .no-matches-msg { color: #aaa; font-style: italic; font-size: 0.95rem; width: 100%; text-align: center; margin: auto; }
+        
+        /* Custom Scrollbar */
+        .right-column::-webkit-scrollbar, .output-group::-webkit-scrollbar { width: 8px; height: 8px; }
+        .right-column::-webkit-scrollbar-thumb, .output-group::-webkit-scrollbar-thumb { background-color: #ccc; border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+    <header>FINDR</header>
+
+    <div class="container">
+        <div class="left-column">
+            <select class="dropdown" id="productDropdown">
+                <option value="" selected disabled>Loading products...</option>
+            </select>
+            
+            <div class="main-display" id="mainDisplayBox">
+                <span class="placeholder-text" id="mainPlaceholder">Please select a product</span>
+                <img id="productImage" src="" alt="Selected product">
+            </div>
+        </div>
+
+        <div class="right-column" id="flowContainer">
+            <div class="no-matches-msg" style="padding: 30px; border: 1px dashed #ccc; border-radius: 12px;">Awaiting selection...</div>
+        </div>
+    </div>
+
+    <script>
+        const dropdown = document.getElementById('productDropdown');
+        const productImage = document.getElementById('productImage');
+        const mainPlaceholder = document.getElementById('mainPlaceholder');
+        const flowContainer = document.getElementById('flowContainer');
+
+        let cutoutsMap = {}; 
+        let matchesMap = {}; 
+
+        // Fetch ALL THREE JSON files
+        Promise.all([
+            fetch('products.json').then(res => { if(!res.ok) throw new Error('products.json missing'); return res.json(); }),
+            fetch('cutouts.json').then(res => { if(!res.ok) throw new Error('cutouts.json missing'); return res.json(); }),
+            fetch('matches.json').then(res => { if(!res.ok) throw new Error('matches.json missing'); return res.json(); })
+        ])
+        .then(([productsData, cutoutsData, matchesData]) => {
+            cutoutsMap = cutoutsData; 
+            matchesMap = matchesData;
+            
+            dropdown.innerHTML = '<option value="" selected disabled>Select a product...</option>'; 
+            
+            productsData.forEach(product => {
+                const option = document.createElement('option');
+                option.value = product.product_id;
+                option.textContent = `${product.product_id} - ${product.productName}`;
+                dropdown.appendChild(option);
+            });
+
+            // Handle dropdown selection
+            dropdown.addEventListener('change', function() {
+                const selectedId = this.value;
+                if (!selectedId) return; 
+                
+                mainPlaceholder.style.display = 'none';
+                productImage.style.display = 'block';
+
+                const imagePath = `downloaded_images/${selectedId}/${selectedId}_s.jpg`;
+                productImage.src = imagePath;
+                
+                loadFlow(selectedId);
+            });
+        })
+        .catch(error => {
+            console.error('CRITICAL ERROR:', error);
+            dropdown.innerHTML = `<option value="" disabled>Error: ${error.message}</option>`;
+        });
+
+        function loadFlow(productId) {
+            flowContainer.innerHTML = ''; 
+
+            const imageList = cutoutsMap[productId];
+            const matchesDataForProduct = matchesMap[productId]; 
+
+            if (!imageList || imageList.length === 0) {
+                flowContainer.innerHTML = '<div class="no-matches-msg" style="padding: 30px; border: 1px dashed #ccc; border-radius: 12px;">No cutouts mapped for this product.</div>';
+                return;
+            }
+
+            const groupedImages = {};
+
+            // Extract the exact category name to group cutouts
+            imageList.forEach(filename => {
+                let category = filename.replace(`${productId}_s.jpg_`, '');
+                category = category.replace('.png', '');
+                category = category.replace(/_\d+$/, ''); // Remove trailing numbers
+
+                if (!groupedImages[category]) groupedImages[category] = [];
+                groupedImages[category].push(filename);
+            });
+
+            // Build the visual rows
+            for (const category in groupedImages) {
+                const rowDiv = document.createElement('div');
+                rowDiv.className = 'flow-row';
+
+                // --- LEFT SIDE (Inputs / Cutouts) ---
+                const inputGroup = document.createElement('div');
+                inputGroup.className = 'input-group'; // Now has box styling!
+                
+                groupedImages[category].forEach(filename => {
+                    const img = new Image();
+                    img.src = `prod-all-sample-next/${productId}/${filename}`;
+                    img.className = 'cutout-img';
+                    img.title = category; 
+                    inputGroup.appendChild(img);
+                });
+                rowDiv.appendChild(inputGroup);
+
+                // --- MIDDLE (Arrow) ---
+                const arrowDiv = document.createElement('div');
+                arrowDiv.className = 'arrow';
+                arrowDiv.innerHTML = '&#8594;'; 
+                rowDiv.appendChild(arrowDiv);
+
+                // --- RIGHT SIDE (Outputs / Matches) ---
+                const outputGroup = document.createElement('div');
+                outputGroup.className = 'output-group';
+
+                let similarProducts = [];
+                
+                // Scan the matches.json to find this specific category's matches
+                if (matchesDataForProduct && matchesDataForProduct.items) {
+                    const matchObj = matchesDataForProduct.items.find(item => item.category === category);
+                    if (matchObj && matchObj.similar_products) {
+                        similarProducts = matchObj.similar_products;
+                    }
+                }
+
+                // If we found similar products, create side-by-side elements for them
+                if (similarProducts.length > 0) {
+                    const seenIds = new Set(); // Prevent duplicates
+
+                    similarProducts.forEach(simProd => {
+                        if(seenIds.has(simProd.product_id)) return; 
+                        seenIds.add(simProd.product_id);
+
+                        const matchItem = document.createElement('a');
+                        matchItem.className = 'match-item';
+                        matchItem.href = simProd.url;
+                        matchItem.target = '_blank'; 
+
+                        const img = new Image();
+                        img.className = 'match-img';
+                        img.src = `https://xcdn.next.co.uk/common/items/default/default/itemimages/3_4Ratio/product/lge/${simProd.product_id}s.jpg?im=Resize,width=200`;
+                        img.title = simProd.product_name;
+
+                        const nameSpan = document.createElement('span');
+                        nameSpan.className = 'match-name';
+                        nameSpan.textContent = simProd.product_name; 
+
+                        matchItem.appendChild(img);
+                        matchItem.appendChild(nameSpan);
+                        outputGroup.appendChild(matchItem);
+                    });
+                } else {
+                    outputGroup.innerHTML = '<span class="no-matches-msg">No similar items found</span>';
+                }
+
+                rowDiv.appendChild(outputGroup);
+                flowContainer.appendChild(rowDiv);
+            }
+        }
+    </script>
+</body>
+</html>
